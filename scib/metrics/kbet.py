@@ -8,6 +8,7 @@ import scipy.sparse
 from ..exceptions import OptionalDependencyNotInstalled, RLibraryNotFound
 from ..utils import check_adata, check_batch
 from .utils import NeighborsError, diffusion_conn, diffusion_nn
+from tqdm.auto import tqdm
 
 
 def kBET(
@@ -90,7 +91,7 @@ def kBET(
     # and increase neighborhoods for knn type data integrations
     if type_ != "knn" and embed is not None:
         adata_tmp = sc.pp.neighbors(adata, n_neighbors=50, use_rep=embed, copy=True)
-    else:
+    elif False:
         # check if pre-computed neighbours are stored in input file
         adata_tmp = adata.copy()
         if "diffusion_connectivities" not in adata.uns["neighbors"]:
@@ -108,18 +109,20 @@ def kBET(
     size_max = 2**31 - 1
 
     # check if neighborhood size too small or only one batch in subset
-    counts = adata_tmp.obs.groupby(label_key).agg(
+    counts = adata.obs.groupby(label_key).agg(
         {label_key: "count", batch_key: "nunique"}
     )
-    labels = counts.query(f"{label_key}>=10 and {batch_key} > 1").index
+    labels = counts.query(f'1000>={label_key}>=10 and {batch_key}>1').index
+    counts.index.name = ''
+    counts = counts.sort_values(by=label_key, ascending=False)
     skipped = counts.index.difference(labels)
     print(f"{len(skipped)} labels consist of a single batch or is too small. Skip.")
     # prepare call of kBET per cluster
     kBET_scores = {"cluster": list(skipped), "kBET": [np.nan] * len(skipped)}
-    for clus in labels:
+    for clus in tqdm(labels, leave=False):
 
         # subset by label
-        adata_sub = adata_tmp[adata_tmp.obs[label_key] == clus, :].copy()
+        adata_sub = adata[adata.obs[label_key] == clus, :]
 
         quarter_mean = np.floor(
             np.mean(adata_sub.obs[batch_key].value_counts()) / 4
@@ -165,7 +168,7 @@ def kBET(
             # check if 75% of all cells can be used for kBET run
             if len(idx_nonan) / len(labs) >= 0.75:
                 # create another subset of components, assume they are not visited in a diffusion process
-                adata_sub_sub = adata_sub[idx_nonan, :].copy()
+                adata_sub_sub = adata_sub[idx_nonan, :]
                 nn_index_tmp = np.empty(shape=(adata_sub.n_obs, k0))
                 nn_index_tmp[:] = np.nan
 
